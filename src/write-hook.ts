@@ -38,6 +38,7 @@ export function registerWriteHook(
 			result: Readonly<ToolExecutionResult>,
 			next: () => Promise<PostToolDecision>,
 		): Promise<PostToolDecision> => {
+			const sessionKey = execSessionKey(exec)
 			return withWorkspace(execCwd(exec), async () => {
 			const decision: PostToolDecision = await next()
 			if (
@@ -56,8 +57,10 @@ export function registerWriteHook(
 
 			try {
 				const cwd = execCwd(exec)
-				const sessionKey = execSessionKey(exec)
 				const signal = exec.signal
+				// The built-in write already emitted its exact post-write version. Do not
+				// emit a second stat after this read: a concurrent writer could make a
+				// version the model never saw appear observed.
 				const { text } = await readAndServe(io, rawPath, cwd, { sessionKey, signal })
 				return {
 					kind: 'accept' as const,
@@ -72,7 +75,7 @@ export function registerWriteHook(
 				)
 				return decision
 			}
-			})
+			}, sessionKey)
 		},
 	)
 }

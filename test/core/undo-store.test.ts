@@ -52,6 +52,25 @@ describe("undo-store", () => {
 		expect(entry!.hashes).toEqual(["bC4"]);
 	});
 
+	it("isolates undo history by session", async () => {
+		await saveUndo(home.testPath, {
+			content: "session-a",
+			bom: "",
+			originalEnding: "\n",
+			hashes: ["aA1"],
+			resultContent: "session-a!",
+		}, "session-a");
+		await saveUndo(home.testPath, {
+			content: "session-b",
+			bom: "",
+			originalEnding: "\n",
+			hashes: ["bB2"],
+			resultContent: "session-b!",
+		}, "session-b");
+		expect((await getUndo(home.testPath, "session-a"))!.content).toBe("session-a");
+		expect((await getUndo(home.testPath, "session-b"))!.content).toBe("session-b");
+	});
+
 	it("clearUndo removes the entry", async () => {
 		await saveUndo(home.testPath, {
 			content: "data",
@@ -142,8 +161,8 @@ describe("undo-store", () => {
 			defensive: false,
 		} as any);
 		const remaining = check
-			.prepare("SELECT COUNT(*) AS n FROM undo WHERE path = ?")
-			.get(home.testPath) as { n: number };
+			.prepare("SELECT COUNT(*) AS n FROM undo WHERE session_id = ? AND path = ?")
+			.get("default", home.testPath) as { n: number };
 		check.close();
 		expect(remaining.n).toBe(0);
 	});

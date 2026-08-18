@@ -49,6 +49,17 @@ interface AgentTools {
 	dispose(): void;
 }
 
+function installFailureGuards(agent: Agent): void {
+	agent.ctx.effect(() =>
+		agent.ctx.tools.guard((execution) => {
+			if (execution.name !== "read" && execution.name !== "edit") {
+				return undefined;
+			}
+			return `[E_PLUGIN_INIT] dsh-better-edit could not initialize; ${execution.name} is disabled instead of falling back to the built-in tool. Restart the session after fixing the plugin configuration.`;
+		}),
+	);
+}
+
 function installAgentTools(rootCtx: Context, agent: Agent): () => void {
 	return agent.ctx.effect(() => {
 		// `fs` is host-plane: use the plugin's own context (covered by
@@ -57,12 +68,13 @@ function installAgentTools(rootCtx: Context, agent: Agent): () => void {
 		// exec.agent.session.header.cwd.
 		const io = ctxFsIO(rootCtx.fs as FileSystem, rootCtx);
 		const disposers: Array<() => void> = [];
-		disposers.push(registerReadTool(rootCtx, agent.ctx, io));
-		const sandbox = new FsSandboxController(rootCtx);
-		disposers.push(registerEditTool(rootCtx, agent.ctx, io, sandbox));
-		disposers.push(registerBatchEditTool(rootCtx, agent.ctx, io, sandbox));
-		disposers.push(registerUndoTool(rootCtx, agent.ctx, io, sandbox));
-		disposers.push(registerWriteHook(rootCtx, agent.ctx, io));
+		try {
+			disposers.push(registerReadTool(rootCtx, agent.ctx, io));
+			const sandbox = new FsSandboxController(rootCtx);
+			disposers.push(registerEditTool(rootCtx, agent.ctx, io, sandbox));
+			disposers.push(registerBatchEditTool(rootCtx, agent.ctx, io, sandbox));
+			disposers.push(registerUndoTool(rootCtx, agent.ctx, io, sandbox));
+			disposers.push(registerWriteHook(rootCtx, agent.ctx, io));
 
 		// Shadow the preset's built-in tool guidance with the hashline contract.
 		// Same section names on the agent's own layer win over the preset's.
@@ -103,15 +115,19 @@ function installAgentTools(rootCtx: Context, agent: Agent): () => void {
 			}),
 		);
 
-		return () => {
-			for (const dispose of disposers) dispose();
-		};
+			return () => {
+				for (const dispose of disposers) dispose();
+			};
+		} catch (error) {
+			for (const dispose of disposers.reverse()) dispose();
+			throw error;
+		}
 	});
 }
 
 /** Mount the bundle: initialize the store, then install tools per agent. */
 export function apply(rootCtx: Context): void {
-	// Warm the hasher once; the per-workspace stores are opened lazily on the
+	// Warm the hasher once; workspace/session stores are opened lazily on the
 	// first tool call in each workspace (there is no shared store to prune at
 	// boot anymore).
 	initHasher().catch((error) => {
@@ -123,13 +139,21 @@ export function apply(rootCtx: Context): void {
 	const registered = new WeakSet<Agent>();
 	rootCtx.on("agent/session-start", ({ agent }) => {
 		if (registered.has(agent)) return;
-		registered.add(agent);
 		try {
 			installAgentTools(rootCtx, agent);
+			registered.add(agent);
 		} catch (error) {
-			rootCtx.logger.warn(
-				`dsh-better-edit: failed to install tools for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`,
-			);
+			const message =
+				`dsh-better-edit: failed to install tools for agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`;
+			rootCtx.logger.warn(message);
+			try {
+				installFailureGuards(agent);
+				registered.add(agent);
+			} catch (guardError) {
+				rootCtx.logger.warn(
+					`dsh-better-edit: failed to install initialization guards for agent ${agent.id}: ${guardError instanceof Error ? guardError.message : String(guardError)}`,
+				);
+			}
 		}
 	});
 }

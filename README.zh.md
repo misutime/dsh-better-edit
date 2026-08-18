@@ -23,12 +23,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.9-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License">
   <img src="https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet.svg" alt="DeepSeek Harness Plugin">
   <img src="https://img.shields.io/npm/v/dsh-better-edit" alt="npm version">
   <img src="https://img.shields.io/npm/dm/dsh-better-edit" alt="npm downloads">
-  <img src="https://img.shields.io/github/stars/Rianico/dsh-better-edit?style=social" alt="GitHub Stars">
+  <img src="https://img.shields.io/github/stars/misutime/dsh-better-edit?style=social" alt="GitHub Stars">
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@
 
 `str_replace` 会让模型逐字复述它要替换的代码——纯粹的转录成本（输出 token，按约 5-6 倍输入计费），也是 Agent 最容易出错的地方：真实模型补丁失败率高达 46–51%，块越大越糟，每次失败都要重新读取并重试。
 
-Hashline 用两个哈希代替旧文本——**编辑 token 减少 31%**（多行范围达 43%）——并对照模型所见内容校验每个范围：编辑要么落在你想要的行的位置，要么响亮失败并回传新锚点。锚点是内容地址，上方编辑后依然有效，连续编辑无需重读；上下文更精简，模型的注意力也保持在代码上，而不是复述上。
+Hashline 用两个哈希代替旧文本——**编辑 token 减少 34%**（多行范围达 46%）——并对照模型所见内容校验每个范围：编辑要么落在你想要的行的位置，要么响亮失败并回传新锚点。锚点是内容地址，上方编辑后依然有效，连续编辑无需重读；上下文更精简，模型的注意力也保持在代码上，而不是复述上。
 
 不适用于单行小改动（接近持平）或新建文件（用 `write`）。它的价值在长会话与结构性编辑中体现——任何不允许改错行的场景。
 
@@ -100,9 +100,9 @@ kQm│}
 
 ## 为什么用 Hashline
 
-**省 token。** 一次编辑调用只携带 `remove_from` / `remove_to`（两个 3 字符哈希）加替换文本——从不回显被替换的文本。`str_replace` 调用则必须逐字复现被替换的文本。在一个真实文件上的 12 次编辑会话中，这可以**减少 31% 的输出 token**（多行范围达 43%）——而且这些是*输出* token，按输入的约 5-6 倍计费。见[基准测试](#基准测试)。
+**省 token。** 一次编辑调用只携带 `remove_from` / `remove_to`（两个 3 字符哈希）加替换文本——从不回显被替换的文本。`str_replace` 调用则必须逐字复现被替换的文本。在一个真实文件上的 12 次编辑会话中，这可以**减少 34% 的输出 token**（多行范围达 46%）——而且这些是*输出* token，按输入的约 5-6 倍计费。见[基准测试](#基准测试)。
 
-**但这从来不是“最省 token”。** 节省随被替换文本的规模增长——单行微调时几乎持平——而且像 [@oh-my-pi/hashline](#对比) 这样的紧凑补丁语言还能发出更轻的负载（同一会话中 42–53%）。关键在于**正确形态**的编辑调用：不复述旧代码，模型除了两个稳定的内容地址外无需跟踪任何东西。
+**但这从来不是“最省 token”。** 节省随被替换文本的规模增长——单行微调时几乎持平——而且像 [@oh-my-pi/hashline](#对比) 这样的紧凑补丁语言还能发出更轻的负载（同一会话中 44–55%）。关键在于**正确形态**的编辑调用：不复述旧代码，模型除了两个稳定的内容地址外无需跟踪任何东西。
 
 **正确性。** 每个解析出的编辑范围都会与模型实际看到的行逐行核对。过期、从未提供或歧义的范围会在**写入任何内容之前**被硬性拒绝，并把当前范围以全新锚点的形式回显（reject-and-serve）——重试无需 `read`。
 
@@ -127,7 +127,7 @@ kQm│}
 
 > `~` = 偶尔/不稳定。`@oh-my-pi/hashline` 是一种紧凑的行锚定补丁语言（[npm](https://www.npmjs.com/package/@oh-my-pi/hashline)、[仓库](https://github.com/can1357/oh-my-pi/tree/main/packages/hashline)）：`[path#tag]` 头把每个 hunk 绑定到全文件内容哈希，`PUT N.=M:` 按行号定位；每次编辑都会重新编号——下一次的行号与标签取自编辑响应或重新 `read`。
 
-**不同的工作，同一条血脉。** 两者都源于 [harness-problem](https://stencil.so/blog/the-harness-problem) 的洞见：模型绝不该复述旧代码。`@oh-my-pi/hashline` 是**补丁语言库**——负载更轻（每次编辑省 42%，单个批量文档省 53%，见[基准测试](#基准测试)），支持语法块操作（`PUT N*:`）、寄存器、`REM`/`MV`、多 hunk 文档、可插拔文件系统（任何后端），以及标签过期时的会话感知三方合并恢复。本插件则是一对 **dsh 工具**：`read` 把 3 字符内容哈希交给模型，`edit` 取其中两个，并对解析出的每一行对照已提供状态校验——无需重新编号、无需重新取标签、错误锚点永远不可能落到错误的行，`undo_last_edit` 重启后依然有效。代价：每次编辑的 JSON 外壳会多一点负载、没有块操作，并且它活在 dsh（Node）内部，而不是独立补丁器（Bun）。要跨后端的补丁格式选 hashline 库；要在 Agent 里做可校验、内容寻址的编辑，选 hashline 工具。
+**不同的工作，同一条血脉。** 两者都源于 [harness-problem](https://stencil.so/blog/the-harness-problem) 的洞见：模型绝不该复述旧代码。`@oh-my-pi/hashline` 是**补丁语言库**——负载更轻（每次编辑省 44%，单个批量文档省 55%，见[基准测试](#基准测试)），支持语法块操作（`PUT N*:`）、寄存器、`REM`/`MV`、多 hunk 文档、可插拔文件系统（任何后端），以及标签过期时的会话感知三方合并恢复。本插件则是一对 **dsh 工具**：`read` 把 3 字符内容哈希交给模型，`edit` 取其中两个，并对解析出的每一行对照已提供状态校验——无需重新编号、无需重新取标签、错误锚点永远不可能落到错误的行，`undo_last_edit` 重启后依然有效。代价：每次编辑的 JSON 外壳会多一点负载、没有块操作，并且它活在 dsh（Node）内部，而不是独立补丁器（Bun）。要跨后端的补丁格式选 hashline 库；要在 Agent 里做可校验、内容寻址的编辑，选 hashline 工具。
 
 ### 边界情况下的正确性
 
@@ -141,9 +141,9 @@ token 基准测试衡量的是模型发出的负载——它假设模型每次�
 | 重复/相同文本 | 每行哈希唯一（冲突已消解）；歧义 → `[E_AMBIGUOUS_ANCHOR]` | 基于位置，重复不会混淆——但位置本身未被校验 |
 | 从未展示给模型的行 | `[E_RANGE_UNSERVED]`——硬拒绝并回传新锚点 | 未展示的 hunk 被拒绝——同样依赖模型知道自己看过什么 |
 | 表达式中间 / 错误的块节点 | 无关——任何已校验的行范围都合法 | 语法规则 + `PUT N*:` 节点选择；点错（锚在 `def` 会让装饰器变成孤儿）会悄悄落错；无语法检查 |
-| 多编辑批量中途失败 | `batch_edit`——原子、全有或全无；失败项以新锚点回显 | 多段补丁先预检——同样原子 |
+| 多编辑批量中途失败 | `batch_edit`——所有项目先预检，文件按顺序写入并尽力回滚 | 多段补丁先预检——提交语义取决于文件系统 |
 
-> oh-my-pi 42–53% 的负载节省来自更轻的线格式；上表才是该格式反过来要求模型记在脑中的东西——重新编号、追标签、选节点——而这恰恰是最容易出错的组件（替换式编辑的补丁失败率 46–51%）。本插件 31% 的代价买来的是一个“错编辑落不了地、任何拒绝都不需要重读”的契约。
+> oh-my-pi 44–55% 的负载节省来自更轻的线格式；上表才是该格式反过来要求模型记在脑中的东西——重新编号、追标签、选节点——而这恰恰是最容易出错的组件（替换式编辑的补丁失败率 46–51%）。本插件 34% 的代价买来的是一个“错编辑落不了地、任何拒绝都不需要重读”的契约。
 
 ## 基准测试
 
@@ -152,8 +152,8 @@ token 基准测试衡量的是模型发出的负载——它假设模型每次�
 | 指标 | hashline | str_replace | oh-my-pi seq / batch |
 | ----------- | :---: | :---: | :---: |
 | 被替换文本是否上线 | ✅ 从不 | ❌ 每次编辑都发 | ✅ 从不 |
-| 输出 token 节省（12 次编辑） | ✅ **31%** | ❌ 0% | ✅ **42% / 53%** |
-| 多行范围节省（3–15 行） | ✅ **29–47%** | ❌ 0% | ✅ **40–53%** |
+| 输出 token 节省（12 次编辑） | ✅ **34%** | ❌ 0% | ✅ **44% / 55%** |
+| 多行范围节省（3–15 行） | ✅ **31–50%** | ❌ 0% | ✅ **40–52%** |
 | 按 5 倍输出计价的实际成本 | ✅ **低约 1.4 倍** | ❌ 1× | ✅ **低约 1.7 倍 / 2.1 倍** |
 | 范围对照已提供状态校验 | ✅ 100% | ❌ 无 | ~ 仅文件版本 |
 | 模型需要跟踪的行号 | ✅ 无——内容锚点 | ✅ 无——文本匹配 | ❌ 每次编辑重新编号 |
@@ -167,9 +167,9 @@ token 基准测试衡量的是模型发出的负载——它假设模型每次�
 | --- | :---: | :---: | :---: | :---: | :---: |
 | 单行 ×8 | 1 | 309 | 324 | 241 | — |
 | 多行 ×4 | 3–15 | 393 | 691 | 349 | — |
-| **合计 ×12** | | **702** | **1015** | **590** | **480** |
+| **合计 ×12** | | **699** | **1059** | **590** | **480** |
 
-相对 `str_replace` 的节省：hashline **313（31%）** · oh-my-pi 逐次 **425（42%）** · oh-my-pi 批量 **535（53%）**。
+相对 `str_replace` 的节省：hashline **360（34%）** · oh-my-pi 逐次 **469（44%）** · oh-my-pi 批量 **579（55%）**。
 
 脚本天然确定：固定语料、内容寻址且自带自检的编辑脚本（语料被重排会直接抛错，而不是悄悄改变测量对象）、固定版本的 tokenizer，且 oh-my-pi 负载在计数前会对照其发布的语法校验。因为一切都是固定的，`npm run benchmark` 对每个人都是同一个结果——本 README 里的数字就是该次运行的一个快照；重新生成，不要轻信。
 
@@ -181,7 +181,7 @@ token 基准测试衡量的是模型发出的负载——它假设模型每次�
 | ------ | ------ |
 | `read` | 以 `HASH│内容` 形式返回文件。参数：`offset`（1 起始）、`limit`。分页输出以 `[Showing lines N-M of T. Use offset=… to continue.]` 结尾。超过 200KB 的行显示为标记并附 `sed` 提示——哈希锚点需要完整行。 |
 | `edit` | 按哈希替换行范围。`path` · `remove_from` · `remove_to` · `replacement_text`（`""` 表示删除）。对解析出的范围内**每一行**对照已提供状态校验；`[E_RANGE_STALE]` / `[E_RANGE_UNSERVED]` / `[E_RANGE_UNVERIFIED]` 拒绝并回传新锚点。 |
-| `batch_edit` | 单次原子调用最多 32 项编辑：`{ edits: [{ path?, remove_from, remove_to, replacement_text }, …] }`。全有或全无；失败项的范围会以新锚点的形式回显。 |
+| `batch_edit` | 单次调用最多 32 项编辑：`{ edits: [{ path?, remove_from, remove_to, replacement_text }, …] }`。所有项目先预检，文件按顺序写入，失败时尽力回滚。 |
 | `undo_last_edit` | `{ path }` 撤销该文件上一次 hashline 编辑，仅当文件仍与存储的编辑后内容一致时生效；重启后依然有效。 |
 
 ### 错误码
@@ -201,6 +201,7 @@ token 基准测试衡量的是模型发出的负载——它假设模型每次�
 | `[E_NOT_FOUND]` | 文件不存在。 |
 | `[E_NOT_OBSERVED]` | 该文件在本会话中尚未被观察（先读后写策略）；请先调用 `read`。 |
 | `[E_NOT_TEXT]` | 路径是目录、二进制或非 UTF-8 文件；hashline 只能编辑文本。 |
+| `[E_PLUGIN_INIT]` | 插件初始化失败；hashline `read`/`edit` 已禁用，不会静默回退到内置工具。 |
 | `[E_RANGE_STALE]` | 某行自被读取以来在磁盘上发生变化；范围以全新锚点回显。 |
 | `[E_RANGE_UNSERVED]` | 范围内包含从未提供给模型的行。 |
 | `[E_RANGE_UNVERIFIED]` | 边界锚点无法对照已提供状态验证。 |
@@ -219,15 +220,15 @@ dsh 的工具注册表按作用域解析：agent 看到的是 `agent → preset 
 
 ## 存储
 
-哈希快照、已提供状态行与撤销历史存放在一个 SQLite 库中，**与被编辑的工作区放在一起**——每个会话 cwd 一个库：
+哈希快照、已提供状态行与撤销历史存放在 DeepSeek Harness 主目录下的私有 SQLite 库中。工具调用的库同时使用工作区身份和不透明的会话标识，因此复用同一 POSIX cwd 的远程 sandbox 也不会共享状态；工具调用之外则不附加会话标识：
 
 ```
-<workspace>/.dsh_better_edit/hash-store.sqlite
+$DSH_HOME/plugins/dsh-better-edit/workspaces/<工作区与会话 SHA-256>/hash-store.sqlite
 ```
 
-不同工作区中的并行会话各自持有独立的库（会话 cwd 会随每次工具调用传递），因此一个项目的锚点与撤销历史不会泄漏到另一个项目。在工具调用之外（测试、预览）会回退到共享的 DeepSeek Harness 主目录（`$DSH_HOME/plugins/dsh-better-edit/hash-store.sqlite`）。
+支持权限控制的宿主会以私有权限创建存储目录；数据库包含完整的编辑前后文件内容。请保持 DSH 主目录为私有目录，不要把数据库复制或提交到源码仓库。撤销记录和已提供状态都按会话与路径隔离。
 
-7 天 TTL 会清理已提供的行；启动时清理缺失文件的快照。损坏的库会被隔离并自动重建。迁移到按工作区布局**不会**迁移共享主目录中的早期撤销历史——把 0.1.2 之前的撤销记录视为已丢失。
+7 天 TTL 会清理已提供的行。损坏的库会被隔离并自动重建。旧版本写入工作区的数据库不会自动迁移。
 
 ## 项目结构
 
@@ -241,11 +242,11 @@ dsh-better-edit/
 │   ├── tool-undo.ts     # undo_last_edit
 │   ├── sandbox.ts       # FsSandboxController 镜像（sandbox_permissions/justification）
 │   ├── write-hook.ts    # 附加到 write 结果的自动读取
-│   ├── served-store.ts  # 按工作区的 SQLite 存储（node:sqlite）
+│   ├── served-store.ts  # 按工作区/会话的 SQLite 存储（node:sqlite）
 │   └── workspace.ts     # 会话 cwd 的 AsyncLocalStorage 载体
 ├── benchmark/           # 可复现的 hashline、str_replace 与 oh-my-pi token 基准测试
 │   └── corpus/          # 固定的 103 行语料
-├── test/                # 615 个测试（移植 + 回归）
+├── test/                # 单元、集成与回归测试
 ├── assets/              # logo 与 banner
 ├── cordis.patch.yml     # bundle 补丁
 └── package.json         # dsh.bundle manifest
@@ -256,7 +257,7 @@ dsh-better-edit/
 ```sh
 npm install
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run（615 个测试）
+npm test            # vitest run
 npm run build       # tsc → lib/
 npm run benchmark   # 可复现的 token 成本基准测试（benchmark/）
 ```
@@ -264,7 +265,7 @@ npm run benchmark   # 可复现的 token 成本基准测试（benchmark/）
 ### 发布流程（先打 tag）
 
 ```sh
-npm run release -- 0.2.0                 # 升版本 + 迁移 CHANGELOG + 提交 + 打 tag + 推送 → 生成 GitHub release
+npm run release -- 0.3.0                 # 升版本 + 迁移 CHANGELOG + 提交 + 打 tag + 推送 → 生成 GitHub release
 npm publish --registry https://registry.npmjs.org   # 版本未打 tag 前会被阻止
 ```
 
@@ -274,20 +275,20 @@ npm publish --registry https://registry.npmjs.org   # 版本未打 tag 前会被
 
 ## 路线图
 
-**当前状态（0.1.7）：** 615 个测试、按工作区存储、参与沙箱策略、served-tail 截断修复、可复现基准测试、中英双语 README、已发布 npm。
+**当前状态（0.2.0）：** hashline read/edit、batch_edit、按会话隔离的 served/undo 状态、DSH 主目录私有存储、参与沙箱策略，以及可复现基准测试。
 
 <details><summary>下一步</summary>
 
-- **缩小或证明与 @oh-my-pi/hashline 的差距**（参考：[`../oh-my-pi.md`](../oh-my-pi.md)）。这个兄弟补丁语言负载更轻——基准测试中相对 `str_replace` 省 42%/53%，而我们省 31%，因为它裸文本式的补丁文档跳过了我们每次调用都要付的 JSON 外壳——还提供了我们不支持的四种能力：语法块操作（`PUT N*:`）、寄存器 + `REM`/`MV`、一次变更一个多 hunk 文档、可插拔文件系统。代价在正确性一侧：它的行号未经验证（当前标签下的错行号会静默落盘）、每次编辑都要重新编号、过期标签触发尽力而为的三方合并而非校验、语法也抬高了模型的技能门槛。逐项决定是拒绝还是采纳——负载差距本身不足以成为切换格式的理由。
-- 在 dsh 会话中实测 0.1.7（served-tail 修复之后）。
+- **缩小或证明与 @oh-my-pi/hashline 的差距**（参考：[`../oh-my-pi.md`](../oh-my-pi.md)）。这个兄弟补丁语言负载更轻——基准测试中相对 `str_replace` 省 44%/55%，而我们省 34%，因为它裸文本式的补丁文档跳过了我们每次调用都要付的 JSON 外壳——还提供了我们不支持的四种能力：语法块操作（`PUT N*:`）、寄存器 + `REM`/`MV`、一次变更一个多 hunk 文档、可插拔文件系统。代价在正确性一侧：它的行号未经验证（当前标签下的错行号会静默落盘）、每次编辑都要重新编号、过期标签触发尽力而为的三方合并而非校验、语法也抬高了模型的技能门槛。逐项决定是拒绝还是采纳——负载差距本身不足以成为切换格式的理由。
+- 在当前 dsh 版本中完成真实 Agent composition 测试。
 - 把 served-tail 截断修复回馈给 pi-hashline-edit-lsz / 上游（他们的 `upsertServed` 同样从不截断）。
-- 对照下一个 dsh 版本重新核对插件接线（当前固定在 `0.1.0-rc.6`；dsh 处于开发者预览阶段，承诺会有破坏性变更）。
+- 对照未来 dsh 版本重新核对插件接线（当前已用 `0.1.0-rc.7` 验证；dsh 仍处于开发者预览阶段，可能有破坏性变更）。
 
 </details>
 
 ## 贡献
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)（或者直接开 [issue](https://github.com/Rianico/dsh-better-edit/issues)）。当前最有价值的贡献是更多基准场景和针对已提供状态校验的边界测试。
+见 [CONTRIBUTING.md](CONTRIBUTING.md)（或者直接开 [issue](https://github.com/misutime/dsh-better-edit/issues)）。当前最有价值的贡献是更多基准场景和针对已提供状态校验的边界测试。
 
 ## 许可证
 
@@ -307,7 +308,7 @@ MIT License——详见 [LICENSE](LICENSE)。移植自 pi-hashline-edit-lsz（MI
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Rianico/dsh-better-edit&type=Date)](https://star-history.com/#Rianico/dsh-better-edit&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=misutime/dsh-better-edit&type=Date)](https://star-history.com/#misutime/dsh-better-edit&Date)
 
 ---
 

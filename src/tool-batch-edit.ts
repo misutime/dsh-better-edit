@@ -1,10 +1,9 @@
 /**
- * The dsh `batch_edit` tool: several hash-anchored edits in one all-or-nothing
- * call. Items targeting the same file are applied in order against the served
- * state; any failing item rejects the whole batch with nothing written, and
- * the failing item's current range is echoed as fresh serves. The per-file
- * sequencing and the persist-undo → write → restore transaction live in the
- * edit engine; this module owns request preparation and result rendering.
+ * The dsh `batch_edit` tool: several hash-anchored edits in one preflighted call.
+ * Items targeting the same file are applied in order against the served state;
+ * validation failure writes nothing, while filesystem writes are sequential with
+ * best-effort rollback. The per-file sequencing and persist-undo → write → restore
+ * flow live in the edit engine; this module owns request preparation and rendering.
  * @module dsh-better-edit/tool-batch-edit
  */
 
@@ -135,7 +134,7 @@ export function buildBatchEditTool(io: FileIO, sandbox: FsSandboxController) {
 				description:
 					`Ordered list of edits, each with the same shape as the edit tool: { path?, remove_from, remove_to, replacement_text }. ` +
 					"Edits to the same file are applied in order and verified against what was served before anything is written. " +
-					"The batch is all-or-nothing: if any edit fails validation, nothing is written and the failing edit\u2019s current range is served back. " +
+					"Validation failure writes nothing; filesystem writes are sequential with best-effort rollback, and the failing edit\u2019s current range is served back. " +
 					"Use batch_edit when you have multiple edits; do not issue several edit calls in one message.",
 				items: {
 					type: "object",
@@ -191,6 +190,7 @@ export function buildBatchEditTool(io: FileIO, sandbox: FsSandboxController) {
 
 				await persistUndoAndWrite({
 					io,
+					sessionKey,
 					files: processed
 						.filter((file) => file.appliedCount > 0)
 						.map((file) => ({
@@ -208,7 +208,7 @@ export function buildBatchEditTool(io: FileIO, sandbox: FsSandboxController) {
 					signal,
 					undoUnavailableMessage: () =>
 						"[E_UNDO_UNAVAILABLE] Cannot persist undo history to the hash store; the batch was NOT applied and no file was written. Retry the batch, or use write if the store cannot be recovered.",
-					restoreUnwrittenUndos: false,
+					restoreUnwrittenUndos: true,
 				});
 
 				const result = buildBatchResult(processed.map(toSection));
@@ -229,7 +229,7 @@ export function buildBatchEditTool(io: FileIO, sandbox: FsSandboxController) {
 					}
 				}
 				return result.content[0]!.text;
-			});
+			}, execSessionKey(exec));
 		},
 	});
 }

@@ -24,6 +24,7 @@ async function withTempHome(
 		join(await getWritableTempRoot(), "pi-hashline-snapshot-test-"),
 	);
 	vi.stubEnv("HOME", tmpHome);
+	vi.stubEnv("DSH_HOME", join(tmpHome, ".dsh"));
 	vi.stubEnv("XDG_CONFIG_HOME", "");
 	try {
 		await run(tmpHome);

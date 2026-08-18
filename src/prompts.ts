@@ -25,7 +25,7 @@ export const EDIT_GUIDELINES = [
 	'`edit`: when the tool shows the post-edit diff, its rows are the fresh anchors for the new file — `+HASH│` and ` HASH│` rows carry current hashes and unchanged lines keep their previous hashes, so you can anchor follow-up edits on the diff.',
 	'`edit`: the tool verifies every line of your range against what it served you. If the file changed since it was served, or a line was never served, the edit is hard-rejected — `[E_RANGE_STALE]` or `[E_RANGE_UNSERVED]` names the first offending line and echoes the current range as fresh `HASH│content` rows. Copy remove_from/remove_to from those echoed rows and retry — the rows count as serves.',
 	'`edit`: only rows the tool delivered count as serves — read output, post-edit diffs, and rejection echoes. Content you saw through bash or another channel is not served state; a range over it is rejected as never-served or unverifiable, and there is no way to waive that check.',
-	'`edit`: do not issue multiple edit calls on the same file in one message. Use `batch_edit` for multiple edits — it validates every edit before writing anything, applies the whole batch all-or-nothing, and returns one combined diff per file.',
+	'`edit`: do not issue multiple edit calls on the same file in one message. Use `batch_edit` for multiple edits — it validates every edit before writing, writes files sequentially, attempts rollback on a write failure, and returns one combined diff per file.',
 ]
 
 export const READ_DESCRIPTION =
@@ -42,19 +42,20 @@ export const READ_GUIDELINES = [
 ]
 
 export const BATCH_EDIT_DESCRIPTION =
-	'Apply several edits in one atomic call. Each item is exactly like the edit tool: ' +
+	'Apply several edits in one preflighted call. Each item is exactly like the edit tool: ' +
 	'{ path?, remove_from, remove_to, replacement_text }, where remove_from and remove_to are ' +
 	'bare 3-char hashes from read or diff output. Items targeting the same file are applied in order. ' +
-	'Every item is verified against what the tool served you before ANYTHING is written: if any item ' +
-	'fails — stale or ambiguous anchor, changed range interior, never-served line — the whole batch ' +
-	'is rejected and no file changes. The failing item\u2019s current range is served back as fresh ' +
+	'Every item is verified against what the tool served you before any file is written: if any item ' +
+	'fails — stale or ambiguous anchor, changed range interior, never-served line — preflight rejects ' +
+	'the batch without file changes. A later filesystem write failure triggers best-effort rollback. ' +
+	'The failing item\u2019s current range is served back as fresh ' +
 	'HASH│content rows so you can retry without a read. Use batch_edit whenever you have multiple ' +
 	'edits; do not issue several edit calls in one message.'
 
 export const BATCH_EDIT_GUIDELINES = [
 	'batch_edit: each item takes the same fields as edit — { path?, remove_from, remove_to, replacement_text }. remove_from and remove_to take ONLY the bare 3-char hash from read/diff output; never the line content.',
 	'batch_edit: items are applied in order. Edits to the same file must not overlap — an item whose range was changed by an earlier item in the batch is rejected.',
-	'batch_edit: the whole batch is all-or-nothing. If any item fails validation, nothing is written anywhere; the failing item\u2019s current range is echoed as fresh HASH│content rows that count as serves.',
+	'batch_edit: all items are preflighted before writes. Validation failure writes nothing; filesystem failure writes sequentially and triggers best-effort rollback. The failing item\u2019s current range is echoed as fresh HASH│content rows that count as serves.',
 	'batch_edit: every item is verified against what the tool served you — stale anchors, changed interiors, or never-served lines reject the batch.',
 	'batch_edit: a noop item (the range already contains the replacement text) is reported without failing the batch; an all-noop batch reports no changes.',
 	'batch_edit: the result is one combined diff per file with fresh anchors — anchor follow-up edits on those rows without re-reading.',

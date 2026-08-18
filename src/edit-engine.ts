@@ -657,17 +657,14 @@ export interface UndoWriteFile {
 export interface PersistWriteOptions {
 	io: FileIO;
 	files: UndoWriteFile[];
+	sessionKey: string;
 	exec: ToolExecution;
 	sandbox: FsSandboxController;
 	sandboxPolicy: SandboxExecutionPolicy | undefined;
 	signal?: AbortSignal;
 	/** [E_UNDO_UNAVAILABLE] message builder, per tool flavor. */
 	undoUnavailableMessage: (displayPath: string) => string;
-	/**
-	 * On write failure, also restore undo entries of files that were saved but
-	 * never written. The single-edit tool restores its one entry; the batch
-	 * tool keeps current behavior and restores only written files.
-	 */
+	/** On write failure, restore undo entries for files that were never written. */
 	restoreUnwrittenUndos?: boolean;
 }
 
@@ -693,7 +690,7 @@ export async function persistUndoAndWrite(
 			originalEnding: file.originalEnding,
 			hashes: file.originalHashes,
 			resultContent: file.result,
-		});
+		}, opts.sessionKey);
 		if (!undo.persisted) {
 			for (const u of undos) {
 				try {
@@ -746,7 +743,7 @@ export async function persistUndoAndWrite(
 				);
 			}
 		}
-		if (opts.restoreUnwrittenUndos) {
+		if (opts.restoreUnwrittenUndos !== false) {
 			for (const u of undos) {
 				if (written.includes(u)) continue;
 				try {
