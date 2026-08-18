@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Hash-anchored edit tools for DeepSeek Harness.<br>
-  Edit by content address — not by line numbers, not by string replacement. Fewer tokens. More attention for real work. Zero misapplied edits.</strong>
+  Edit by content address — not by line numbers, not by string replacement. Fewer tokens. More attention for real work. Stale and ambiguous edits are rejected before writing.</strong>
 </p>
 
 <p align="center">
@@ -23,12 +23,12 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.1.9-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License">
   <img src="https://img.shields.io/badge/DeepSeek_Harness-Plugin-blueviolet.svg" alt="DeepSeek Harness Plugin">
   <img src="https://img.shields.io/npm/v/dsh-better-edit" alt="npm version">
   <img src="https://img.shields.io/npm/dm/dsh-better-edit" alt="npm downloads">
-  <img src="https://img.shields.io/github/stars/Rianico/dsh-better-edit?style=social" alt="GitHub Stars">
+  <img src="https://img.shields.io/github/stars/misutime/dsh-better-edit?style=social" alt="GitHub Stars">
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@ resolved range is verified against exactly what the model saw — wrong-line edi
 
 `str_replace` makes the model re-type the code it's replacing — pure transcription cost (output tokens, billed ~5-6× input), and where agents fail most: 46–51% patch failures on real models, worse on bigger blocks, each failure costing a re-read and a retry.
 
-Hashline sends two hashes instead of the old text — **31% fewer edit tokens** (43% on multi-line ranges) — and verifies every range against what the model saw: an edit lands where you meant, or fails loudly with fresh anchors. Anchors are content addresses that survive edits above, so chained edits skip re-reads — and a leaner context keeps the model's attention on the code, not on re-transcribing it.
+Hashline sends two hashes instead of the old text — **34% fewer edit tokens** (46% on multi-line ranges) — and verifies every range against what the model saw: an edit lands where you meant, or fails loudly with fresh anchors. Anchors are content addresses that survive edits above, so chained edits skip re-reads — and a leaner context keeps the model's attention on the code, not on re-transcribing it.
 
 Not for one-line touch-ups (near parity) or new files (`write`). It pays off in long sessions and structural edits — anywhere an edit must not land on the wrong line.
 
@@ -106,13 +106,13 @@ and produces a diff with fresh anchors, so the next edit verifies cleanly with n
 
 **Token-saving.** An edit call carries `remove_from` / `remove_to` (two 3-char hashes) plus the
 replacement text — it never echoes the text being replaced. A `str_replace` call must reproduce that
-text verbatim. On a 12-edit session over a realistic file this is **31% fewer output tokens** (43%
+text verbatim. On a 12-edit session over a realistic file this is **34% fewer output tokens** (46%
 on multi-line ranges) — and these are *output* tokens, billed at ~5-6× the input rate. See the
 [benchmark](#benchmark).
 
 **But this was never about “fewest tokens.”** Savings scale with the replaced text — near parity on
 one-line touch-ups — and a compact patch language like [@oh-my-pi/hashline](#how-it-compares) can
-emit a lighter payload still (42–53% on the same session). The point is the *right* kind of edit
+emit a lighter payload still (44–55% on the same session). The point is the *right* kind of edit
 call: no re-typing old code, and nothing for the model to track except two stable content addresses.
 
 **Correctness.** Every resolved edit range is verified against the exact lines the model was shown.
@@ -147,8 +147,8 @@ pins a line by what it *is*, not by where it used to sit.
 
 **Different jobs, same lineage.** Both descend from the
 [harness-problem](https://stencil.so/blog/the-harness-problem) insight that the model should never
-re-type old code. `@oh-my-pi/hashline` is a **patch-language library** — payload-light (42% saved
-per edit, 53% in a single batch document, see [benchmark](#benchmark)), with syntactic block ops
+re-type old code. `@oh-my-pi/hashline` is a **patch-language library** — payload-light (44% saved
+per edit, 55% in a single batch document, see [benchmark](#benchmark)), with syntactic block ops
 (`PUT N*:`), registers, `REM`/`MV`, multi-hunk documents, a pluggable filesystem for any backend,
 and session-aware 3-way-merge recovery on stale tags. This plugin is a **dsh tool pair**: `read`
 hands the model 3-char content hashes, `edit` takes two of them, and every resolved line is verified
@@ -173,12 +173,12 @@ repeated text), and what each tool does when they hit:
 | Repeated / identical text | Per-line hashes are unique (collision-resolved); ambiguity → `[E_AMBIGUOUS_ANCHOR]` | Position-based, so repeats don't confuse it — but the position itself is unverified |
 | Lines never shown to the model | `[E_RANGE_UNSERVED]` — hard reject with fresh anchors | Undisplayed hunks rejected — same reliance on the model knowing what it saw |
 | Mid-expression / wrong block node | Irrelevant — any verified line range is valid | Grammar rules + `PUT N*:` node choice; mispointing (anchoring `def` orphans its decorator) silently lands wrong; no syntax check |
-| Multi-edit batch fails mid-way | `batch_edit` — atomic, all-or-nothing; the failing item is echoed as fresh serves | Multi-section patches preflighted up front — also atomic |
+| Multi-edit batch fails mid-way | `batch_edit` — all items are preflighted; writes are sequential with best-effort rollback | Multi-section patches preflighted up front — commit semantics depend on the filesystem |
 
-> The 42–53% oh-my-pi payload saving is a lighter wire format; the table above is what that
+> The 44–55% oh-my-pi payload saving is a lighter wire format; the table above is what that
 > format asks the model to hold in its head instead — renumbering, tag-chasing, node choice —
 > the exact component that fails most (46–51% patch-failure rates on replace-style edits). This
-> plugin's 31% is the price of a contract where a wrong edit cannot land, and any rejection
+> plugin's 34% is the price of a contract where a wrong edit cannot land, and any rejection
 > needs no re-read.
 
 ## Benchmark
@@ -192,8 +192,8 @@ its modes — one `[path#tag]` section per edit (`seq`) and one multi-hunk batch
 | Criterion | hashline | str_replace | oh-my-pi seq / batch |
 | ----------- | :---: | :---: | :---: |
 | Replaced text sent over the wire | ✅ never | ❌ every edit | ✅ never |
-| Output tokens saved (12-edit session) | ✅ **31%** | ❌ 0% | ✅ **42% / 53%** |
-| Multi-line range savings (3–15 lines) | ✅ **29–47%** | ❌ 0% | ✅ **40–53%** |
+| Output tokens saved (12-edit session) | ✅ **34%** | ❌ 0% | ✅ **44% / 55%** |
+| Multi-line range savings (3–15 lines) | ✅ **31–50%** | ❌ 0% | ✅ **40–52%** |
 | Effective cost at 5× output pricing | ✅ **~1.4× less** | ❌ 1× | ✅ **~1.7× / ~2.1× less** |
 | Ranges verified against served state | ✅ 100% | ❌ none | ~ file version only |
 | Line numbers the model must track | ✅ none — content anchors | ✅ none — text match | ❌ renumber every edit |
@@ -205,11 +205,11 @@ The numbers above are **deterministic and you can reproduce them locally** — `
 
 | Scenario | Lines | hashline | str_replace | oh-my-pi seq | oh-my-pi batch |
 | --- | :---: | :---: | :---: | :---: | :---: |
-| single-line ×8 | 1 | 309 | 324 | 241 | — |
-| multi-line ×4 | 3–15 | 393 | 691 | 349 | — |
-| **TOTAL ×12** | | **702** | **1015** | **590** | **480** |
+| single-line ×8 | 1 | 305 | 334 | 241 | — |
+| multi-line ×4 | 3–15 | 394 | 725 | 349 | — |
+| **TOTAL ×12** | | **699** | **1059** | **590** | **480** |
 
-Saved vs `str_replace`: hashline **313 (31%)** · oh-my-pi per-edit **425 (42%)** · oh-my-pi batch **535 (53%)**.
+Saved vs `str_replace`: hashline **360 (34%)** · oh-my-pi per-edit **469 (44%)** · oh-my-pi batch **579 (55%)**.
 
 The script is deterministic by construction: a frozen corpus, a content-addressed edit script that
 self-checks (a reformatted corpus throws instead of silently changing what's measured), a pinned
@@ -234,7 +234,7 @@ this README are a snapshot of that run; regenerate, don't trust.
 | ------ | -------------- |
 | `read` | Returns a file with every line as `HASH│content`. Parameters: `offset` (1-based), `limit`. Paged output ends with `[Showing lines N-M of T. Use offset=… to continue.]`. Lines >200KB are shown as a marker with a `sed` hint — hash anchors need full lines. |
 | `edit` | Replaces a range of lines by hash. `path` · `remove_from` · `remove_to` · `replacement_text` (`""` deletes). Verifies **every line** of the resolved range against served state; `[E_RANGE_STALE]` / `[E_RANGE_UNSERVED]` / `[E_RANGE_UNVERIFIED]` reject-and-serve fresh anchors. |
-| `batch_edit` | Up to 32 edits in one atomic call: `{ edits: [{ path?, remove_from, remove_to, replacement_text }, …] }`. All-or-nothing; the failing item's range is echoed as fresh serves. |
+| `batch_edit` | Up to 32 edits in one call: `{ edits: [{ path?, remove_from, remove_to, replacement_text }, …] }`. All items are preflighted; filesystem writes are sequential and rollback is best-effort. |
 | `undo_last_edit` | `{ path }` reverts the last hashline edit, only while the file still matches the stored post-edit content; survives restarts. |
 
 ### Error codes
@@ -247,13 +247,14 @@ this README are a snapshot of that run; regenerate, don't trust.
 | `[E_BAD_REF]` | `remove_from`/`remove_to` is not a bare 3-char hash. |
 | `[E_BAD_SHAPE]` | Request/field shape is wrong (unknown fields, missing path, non-string text, …). |
 | `[E_BARE_HASH_PREFIX]` | `HASH│` prefix pasted into `replacement_text` (autocorrected). |
-| `[E_BATCH_ABORT]` | A batch item failed; the whole batch was rejected, nothing written. |
+| `[E_BATCH_ABORT]` | A batch item failed; preflight rejects before writes, while write failures trigger best-effort rollback. |
 | `[E_FILE_TOO_LARGE]` | File exceeds the hashline line ceiling; use `write` or another approach. |
 | `[E_INVALID_PATCH]` | Diff-preview markers pasted into `replacement_text` (autocorrected). |
 | `[E_NOOP_LOOP]` | The exact same edit keeps producing no change; resubmitting is rejected. |
 | `[E_NOT_FOUND]` | File does not exist. |
 | `[E_NOT_OBSERVED]` | The file has not been observed in this session (read-before-write policy); call `read` first. |
 | `[E_NOT_TEXT]` | Path is a directory, binary, or non-UTF-8 file; hashline edits only text. |
+| `[E_PLUGIN_INIT]` | The plugin could not initialize; hashline `read`/`edit` are disabled instead of falling back silently. |
 | `[E_RANGE_STALE]` | A served line differs on disk since it was read; the range is echoed fresh. |
 | `[E_RANGE_UNSERVED]` | The range includes lines never served to the model. |
 | `[E_RANGE_UNVERIFIED]` | Boundary anchor cannot be verified against served state. |
@@ -277,21 +278,21 @@ registration cannot replace them. This plugin:
 
 ## Store
 
-Hash snapshots, served-state rows, and undo history live in one SQLite store **co-located with the
-workspace being edited** — one store per session cwd:
+Hash snapshots, served-state rows, and undo history live in a private SQLite store below the DeepSeek
+Harness home. Tool-call stores are keyed by workspace identity and opaque session key, so separate
+remote sandboxes that reuse a POSIX cwd cannot share state. Outside a tool call, the workspace key is
+used without a session suffix:
 
 ```
-<workspace>/.dsh_better_edit/hash-store.sqlite
+$DSH_HOME/plugins/dsh-better-edit/workspaces/<sha256-of-workspace-and-session>/hash-store.sqlite
 ```
 
-Parallel sessions in different workspaces keep separate stores (the session cwd is carried through
-each tool call), so one project's anchors and undo history never leak into another's. Outside a tool
-call (tests, previews) the store falls back to the shared DeepSeek Harness home
-(`$DSH_HOME/plugins/dsh-better-edit/hash-store.sqlite`).
+The store directory is created with private permissions where the host supports them; the database
+contains complete pre- and post-edit file contents. Keep the DSH home private and do not copy the
+store into source control. Undo and served rows are isolated by session and path.
 
-A 7-day TTL prunes served rows; missing-file snapshots are pruned at startup. Corrupt stores are
-quarantined and rebuilt automatically. Moving to the per-workspace layout does not migrate earlier
-undo history from the shared home — treat any pre-0.1.2 undo entries as gone.
+A 7-day TTL prunes served rows. Corrupt stores are quarantined and rebuilt automatically. Existing
+workspace-local stores from releases before this layout are not migrated automatically.
 
 ## Project Structure
 
@@ -305,11 +306,11 @@ dsh-better-edit/
 │   ├── tool-undo.ts     # undo_last_edit
 │   ├── sandbox.ts       # FsSandboxController mirror (sandbox_permissions/justification)
 │   ├── write-hook.ts    # auto-read appended to write results
-│   ├── served-store.ts  # per-workspace SQLite store (node:sqlite)
+│   ├── served-store.ts  # workspace/session SQLite store (node:sqlite)
 │   └── workspace.ts     # session-cwd AsyncLocalStorage carrier
 ├── benchmark/           # reproducible hashline-vs-str_replace-vs-oh-my-pi token benchmark
 │   └── corpus/          # frozen 103-line fixture
-├── test/                # 615 tests (ported + regression)
+├── test/                # unit, integration, and regression tests
 ├── assets/              # logo + banner
 ├── cordis.patch.yml     # bundle patch
 └── package.json         # dsh.bundle manifest
@@ -320,7 +321,7 @@ dsh-better-edit/
 ```sh
 npm install
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (615 tests)
+npm test            # vitest run
 npm run build       # tsc → lib/
 npm run benchmark   # reproducible token-cost benchmark (benchmark/)
 ```
@@ -328,7 +329,7 @@ npm run benchmark   # reproducible token-cost benchmark (benchmark/)
 ### Releasing (tag-first)
 
 ```sh
-npm run release -- 0.2.0                 # bump + CHANGELOG move + commit + tag + push → GitHub release
+npm run release -- 0.3.0                 # bump + CHANGELOG move + commit + tag + push → GitHub release
 npm publish --registry https://registry.npmjs.org   # blocked until the version is tagged
 ```
 
@@ -342,23 +343,23 @@ local filesystem bridge.
 
 ## Roadmap
 
-**Current state (0.1.6):** 615 tests, per-workspace store, sandbox policy participation, the
-served-tail truncation fix, reproducible benchmark, EN + 中文 READMEs, published on npm.
+**Current state (0.2.0):** hashline read/edit, batch_edit, session-scoped served and undo state,
+private DSH-home storage, sandbox policy participation, and reproducible benchmark.
 
 <details><summary>Next</summary>
 
-- **Close or justify the gap vs @oh-my-pi/hashline** (reference: [`../oh-my-pi.md`](../oh-my-pi.md)). The sibling patch language is payload-lighter — 42%/53% vs our 31% vs `str_replace` on the benchmark, because a bare patch document skips the JSON envelope we pay per call — and offers four abilities we do not support: syntactic block ops (`PUT N*:`), registers + `REM`/`MV`, one multi-hunk document per change, and a pluggable filesystem. The counterweight is correctness: its line numbers are unverified (a wrong number on a current tag lands silently), every edit renumbers, stale tags trigger best-effort 3-way merge instead of verification, and the grammar raises the model skill floor. Decide each ability reject-or-adopt on its own merits — the payload gap alone is not a reason to switch formats.
-- Verify 0.1.6 live in a dsh session after the served-tail fix.
+- **Close or justify the gap vs @oh-my-pi/hashline** (reference: [`../oh-my-pi.md`](../oh-my-pi.md)). The sibling patch language is payload-lighter — 44%/55% vs our 34% vs `str_replace` on the benchmark, because a bare patch document skips the JSON envelope we pay per call — and offers four abilities we do not support: syntactic block ops (`PUT N*:`), registers + `REM`/`MV`, one multi-hunk document per change, and a pluggable filesystem. The counterweight is correctness: its line numbers are unverified (a wrong number on a current tag lands silently), every edit renumbers, stale tags trigger best-effort 3-way merge instead of verification, and the grammar raises the model skill floor. Decide each ability reject-or-adopt on its own merits — the payload gap alone is not a reason to switch formats.
+- Verify the current dsh Agent composition with a real session.
 - Upstream the served-tail truncation fix to pi-hashline-edit-lsz / upstream (their `upsertServed`
   never truncates either).
-- Re-check plugin wiring against the next dsh release (pinned to `0.1.0-rc.6`; dsh is in developer
+- Re-check plugin wiring against future dsh releases (validated against `0.1.0-rc.7`; dsh is in developer
   preview and promises breaking changes).
 
 </details>
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) (or just open an [issue](https://github.com/Rianico/dsh-better-edit/issues)).
+See [CONTRIBUTING.md](CONTRIBUTING.md) (or just open an [issue](https://github.com/misutime/dsh-better-edit/issues)).
 The most valuable contributions right now are more benchmark scenarios and edge-case tests for the
 served-state verification.
 
@@ -391,7 +392,7 @@ O(S+R) → O(R) edit-call saving) and an independent
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=Rianico/dsh-better-edit&type=Date)](https://star-history.com/#Rianico/dsh-better-edit&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=misutime/dsh-better-edit&type=Date)](https://star-history.com/#misutime/dsh-better-edit&Date)
 
 ---
 

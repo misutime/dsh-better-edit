@@ -57,7 +57,7 @@ export function buildUndoTool(io: FileIO, sandbox: FsSandboxController) {
 			const absolutePath = await io.resolve(path, cwd, signal);
 			const sandboxPolicy = await sandbox.resolvePolicy("undo_last_edit", canonical as unknown as FsEscalationArgs, exec);
 
-			const undo = await getUndo(absolutePath);
+			const undo = await getUndo(absolutePath, sessionKey);
 			if (!undo) {
 				return `No undo history for ${path}. There is no previous edit to revert.`;
 			}
@@ -68,7 +68,7 @@ export function buildUndoTool(io: FileIO, sandbox: FsSandboxController) {
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message.includes("[E_NOT_FOUND]")) {
-					await clearUndo(absolutePath);
+					await clearUndo(absolutePath, sessionKey);
 					return `[E_UNDO_STALE] Cannot undo last edit on ${path}: the file no longer exists. Call read() to inspect the current state.`;
 				}
 				throw error;
@@ -77,7 +77,7 @@ export function buildUndoTool(io: FileIO, sandbox: FsSandboxController) {
 				currentRaw !==
 				undo.bom + restoreEndings(undo.resultContent, undo.originalEnding)
 			) {
-				await clearUndo(absolutePath);
+				await clearUndo(absolutePath, sessionKey);
 				return `[E_UNDO_STALE] Cannot undo last edit on ${path}: the file was modified after the edit, so undoing would overwrite those changes. Call read() to inspect the current state.`;
 			}
 
@@ -129,7 +129,7 @@ export function buildUndoTool(io: FileIO, sandbox: FsSandboxController) {
 				);
 			}
 
-			await clearUndo(absolutePath);
+			await clearUndo(absolutePath, sessionKey);
 
 			const parts: string[] = [`Undone last edit on ${path}.`];
 			if (linesAddedByEdit > 0 || linesRemovedByEdit > 0) {
@@ -151,10 +151,8 @@ export function buildUndoTool(io: FileIO, sandbox: FsSandboxController) {
 				);
 			}
 
-			return [parts.join("\n"), "", "Diff of the revert:", "", undoDiff].join(
-				"\n",
-			);
-			})
+			return [parts.join("\n"), "", "Diff of the revert:", "", undoDiff].join("\n");
+			}, execSessionKey(exec))
 		},
 	});
 }

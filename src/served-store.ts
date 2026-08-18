@@ -8,7 +8,7 @@
  * verification live with the hashline module (`hashline/served.ts`); drift
  * computation lives in `drift.ts`. Both import from here.
  *
- * The API is async-only: every operation loads the per-workspace hash store
+ * The API is async-only: every operation loads the workspace/session hash store
  * and resolves it through the active workspace context. There is deliberately
  * no sync half — the two-vocabulary, every-op-twice surface it produced is
  * gone.

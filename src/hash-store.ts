@@ -15,11 +15,11 @@
  */
 
 import { existsSync } from "node:fs";
-import { readFile, rename, mkdir, stat } from "node:fs/promises";
+import { chmod, readFile, rename, mkdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { hashStorePath } from "./paths.js";
-import { workspaceCwd } from "./workspace.js";
+import { workspaceCwd, workspaceSessionKey } from "./workspace.js";
 import { errCode, splitLines } from "./utils.js";
 import { initHasher, contentChecksum } from "./hashline/hasher.js";
 import { HASH_RE } from "./hashline/alphabet.js";
@@ -80,6 +80,7 @@ interface Prepared {
 	undoUpsert: (...params: SqlParams) => void;
 	undoGet: (...params: SqlParams) => Record<string, unknown> | undefined;
 	undoDelete: (...params: SqlParams) => void;
+	undoDeletePath: (...params: SqlParams) => void;
 	servedGet: (...params: SqlParams) => Record<string, unknown> | undefined;
 	servedUpsert: (...params: SqlParams) => void;
 	servedReportedUpsert: (...params: SqlParams) => void;
@@ -118,11 +119,11 @@ export interface HashStore {
 	/** Paths whose stored snapshot hashes contain every given anchor. */
 	findSnapshotPaths(hashes: string[]): string[];
 
-	// ---- undo entries (one per path) ----------------------------------------
-	/** The undo row for a path, healing a corrupt row (parse → validate → delete). */
-	getUndo(path: string): UndoRecord | undefined;
-	upsertUndo(path: string, entry: UndoRecord): void;
-	deleteUndo(path: string): void;
+	// ---- undo entries (one per session+path) --------------------------------
+	/** The undo row for a session and path, healing a corrupt row (parse → validate → delete). */
+	getUndo(path: string, sessionKey?: string): UndoRecord | undefined;
+	upsertUndo(path: string, entry: UndoRecord, sessionKey?: string): void;
+	deleteUndo(path: string, sessionKey?: string): void;
 
 	// ---- served rows (what the model has seen, per session+path) ------------
 	/** The served hashes array for a session+path, healing a corrupt row; [] when nothing was served. */
@@ -198,7 +199,7 @@ function openDbWithBusyRetry(storePath: string): {
 	return withBusyRetry(() => openDb(storePath));
 }
 
-/** One open store per store path (per workspace); parallel sessions share per-workspace dbs. */
+/** One open store per store path; tool sessions use session-keyed stores. */
 const stores = new Map<
 	string,
 	{ path: string; db: DatabaseSync; stmts: Prepared; store: HashStore }
@@ -225,65 +226,85 @@ function openDb(storePath: string): { db: DatabaseSync; stmts: Prepared } {
 function buildStore(db: DatabaseSync): { db: DatabaseSync; stmts: Prepared } {
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA synchronous = NORMAL");
-	db.exec(
-		"CREATE TABLE IF NOT EXISTS snapshots (" +
-			"path TEXT PRIMARY KEY, " +
-			"checksum TEXT NOT NULL, " +
-			"line_count INTEGER NOT NULL, " +
-			"hashes TEXT NOT NULL, " +
-			"updated_at INTEGER NOT NULL" +
-			")",
-	);
-	db.exec(
-		"CREATE TABLE IF NOT EXISTS meta (" +
-			"key TEXT PRIMARY KEY, " +
-			"value TEXT NOT NULL" +
-			")",
-	);
-	db.exec(
-		"CREATE TABLE IF NOT EXISTS undo (" +
-			"path TEXT PRIMARY KEY, " +
-			"content TEXT NOT NULL, " +
-			"bom TEXT NOT NULL, " +
-			"ending TEXT NOT NULL, " +
-			"hashes TEXT NOT NULL, " +
-			"result_content TEXT NOT NULL, " +
-			"updated_at INTEGER NOT NULL" +
-			")",
-	);
-	const versionRow = db
-		.prepare("SELECT value FROM meta WHERE key = 'version'")
-		.get() as { value?: string } | undefined;
-	const versionChanged =
-		versionRow !== undefined &&
-		versionRow.value !== String(HASH_STORE_VERSION);
-	if (versionChanged) {
-		db.exec("DELETE FROM snapshots");
-		db.exec("DELETE FROM undo");
+	db.exec("BEGIN IMMEDIATE");
+	try {
+		db.exec(
+			"CREATE TABLE IF NOT EXISTS snapshots (" +
+				"path TEXT PRIMARY KEY, " +
+				"checksum TEXT NOT NULL, " +
+				"line_count INTEGER NOT NULL, " +
+				"hashes TEXT NOT NULL, " +
+				"updated_at INTEGER NOT NULL" +
+				")",
+		);
+		db.exec(
+			"CREATE TABLE IF NOT EXISTS meta (" +
+				"key TEXT PRIMARY KEY, " +
+				"value TEXT NOT NULL" +
+				")",
+		);
+		const versionRow = db
+			.prepare("SELECT value FROM meta WHERE key = 'version'")
+			.get() as { value?: string } | undefined;
+		const versionChanged =
+			versionRow !== undefined &&
+			versionRow.value !== String(HASH_STORE_VERSION);
+		const undoColumns = db.prepare("PRAGMA table_info(undo)").all() as {
+			name: string;
+		}[];
+		if (versionChanged) db.exec("DELETE FROM snapshots");
+		if (
+			versionChanged ||
+			(undoColumns.length > 0 &&
+				!undoColumns.some((column) => column.name === "session_id"))
+		) {
+			db.exec("DROP TABLE IF EXISTS undo");
+		}
+		const servedColumns = db.prepare("PRAGMA table_info(served)").all() as {
+			name: string;
+		}[];
+		if (
+			versionChanged ||
+			!servedColumns.some((column) => column.name === "session_id")
+		) {
+			db.exec("DROP TABLE IF EXISTS served");
+		}
+		db.exec(
+			"CREATE TABLE IF NOT EXISTS served (" +
+				"session_id TEXT NOT NULL, " +
+				"path TEXT NOT NULL, " +
+				"hashes TEXT NOT NULL, " +
+				"reported TEXT, " +
+				"updated_at INTEGER NOT NULL, " +
+				"PRIMARY KEY (session_id, path)" +
+				")",
+		);
+		db.exec(
+			"CREATE TABLE IF NOT EXISTS undo (" +
+				"session_id TEXT NOT NULL, " +
+				"path TEXT NOT NULL, " +
+				"content TEXT NOT NULL, " +
+				"bom TEXT NOT NULL, " +
+				"ending TEXT NOT NULL, " +
+				"hashes TEXT NOT NULL, " +
+				"result_content TEXT NOT NULL, " +
+				"updated_at INTEGER NOT NULL, " +
+				"PRIMARY KEY (session_id, path)" +
+				")",
+		);
+		db.prepare(
+			"INSERT INTO meta (key, value) VALUES ('version', ?) " +
+				"ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+		).run(String(HASH_STORE_VERSION));
+		db.exec("COMMIT");
+	} catch (error) {
+		try {
+			db.exec("ROLLBACK");
+		} catch {
+			// The original schema error is more useful than a rollback failure.
+		}
+		throw error;
 	}
-	const servedColumns = db.prepare("PRAGMA table_info(served)").all() as {
-		name: string;
-	}[];
-	if (
-		versionChanged ||
-		!servedColumns.some((column) => column.name === "session_id")
-	) {
-		db.exec("DROP TABLE IF EXISTS served");
-	}
-	db.exec(
-		"CREATE TABLE IF NOT EXISTS served (" +
-			"session_id TEXT NOT NULL, " +
-			"path TEXT NOT NULL, " +
-			"hashes TEXT NOT NULL, " +
-			"reported TEXT, " +
-			"updated_at INTEGER NOT NULL, " +
-			"PRIMARY KEY (session_id, path)" +
-			")",
-	);
-	db.prepare(
-		"INSERT INTO meta (key, value) VALUES ('version', ?) " +
-			"ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-	).run(String(HASH_STORE_VERSION));
 	const getStmt = db.prepare(
 		"SELECT hashes FROM snapshots WHERE path = ? AND checksum = ? AND line_count = ?",
 	);
@@ -297,13 +318,14 @@ function buildStore(db: DatabaseSync): { db: DatabaseSync; stmts: Prepared } {
 			"ON CONFLICT(path) DO UPDATE SET checksum = excluded.checksum, line_count = excluded.line_count, hashes = excluded.hashes, updated_at = excluded.updated_at",
 	);
 	const undoUpsertStmt = db.prepare(
-		"INSERT INTO undo (path, content, bom, ending, hashes, result_content, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) " +
-			"ON CONFLICT(path) DO UPDATE SET content = excluded.content, bom = excluded.bom, ending = excluded.ending, hashes = excluded.hashes, result_content = excluded.result_content, updated_at = excluded.updated_at",
+		"INSERT INTO undo (session_id, path, content, bom, ending, hashes, result_content, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
+			"ON CONFLICT(session_id, path) DO UPDATE SET content = excluded.content, bom = excluded.bom, ending = excluded.ending, hashes = excluded.hashes, result_content = excluded.result_content, updated_at = excluded.updated_at",
 	);
 	const undoGetStmt = db.prepare(
-		"SELECT content, bom, ending, hashes, result_content FROM undo WHERE path = ?",
+		"SELECT content, bom, ending, hashes, result_content FROM undo WHERE session_id = ? AND path = ?",
 	);
-	const undoDelStmt = db.prepare("DELETE FROM undo WHERE path = ?");
+	const undoDelStmt = db.prepare("DELETE FROM undo WHERE session_id = ? AND path = ?");
+	const undoDelPathStmt = db.prepare("DELETE FROM undo WHERE path = ?");
 	const servedGetStmt = db.prepare(
 		"SELECT hashes, reported FROM served WHERE session_id = ? AND path = ?",
 	);
@@ -353,6 +375,11 @@ function buildStore(db: DatabaseSync): { db: DatabaseSync; stmts: Prepared } {
 		undoDelete: (...params) => {
 			withBusyRetry(() => {
 				undoDelStmt.run(...params);
+			});
+		},
+		undoDeletePath: (...params) => {
+			withBusyRetry(() => {
+				undoDelPathStmt.run(...params);
 			});
 		},
 		servedGet: (...params) =>
@@ -449,13 +476,13 @@ function makeDomainStore(stmts: Prepared): HashStore {
 			return matches;
 		},
 
-		getUndo(path) {
-			const row = stmts.undoGet(path);
+		getUndo(path, sessionKey = "default") {
+			const row = stmts.undoGet(sessionKey, path);
 			if (!row) return undefined;
 			try {
 				const parsed = JSON.parse(row.hashes as string);
 				if (!isValidHashList(parsed)) {
-					stmts.undoDelete(path);
+					stmts.undoDelete(sessionKey, path);
 					return undefined;
 				}
 				return {
@@ -466,12 +493,13 @@ function makeDomainStore(stmts: Prepared): HashStore {
 					resultContent: row.result_content as string,
 				};
 			} catch {
-				stmts.undoDelete(path);
+				stmts.undoDelete(sessionKey, path);
 				return undefined;
 			}
 		},
-		upsertUndo(path, entry) {
+		upsertUndo(path, entry, sessionKey = "default") {
 			stmts.undoUpsert(
+				sessionKey,
 				path,
 				entry.content,
 				entry.bom,
@@ -481,8 +509,8 @@ function makeDomainStore(stmts: Prepared): HashStore {
 				Date.now(),
 			);
 		},
-		deleteUndo(path) {
-			stmts.undoDelete(path);
+		deleteUndo(path, sessionKey = "default") {
+			stmts.undoDelete(sessionKey, path);
 		},
 
 		getServed(sessionKey, path) {
@@ -544,7 +572,7 @@ function makeDomainStore(stmts: Prepared): HashStore {
 			withStore(() => {
 				for (const path of missing) {
 					stmts.deleteOne(path);
-					stmts.undoDelete(path);
+					stmts.undoDeletePath(path);
 					stmts.servedDeletePath(path);
 				}
 			});
@@ -609,11 +637,29 @@ async function statMissing(rows: { path: string }[]): Promise<string[]> {
 	return missing;
 }
 
+async function securePath(path: string, mode: number): Promise<void> {
+	try {
+		await chmod(path, mode);
+	} catch (error) {
+		if (errCode(error) === "ENOENT") return;
+		if (process.platform === "win32") return;
+		throw new Error(`Unable to secure hash-store path: ${path}`, { cause: error });
+	}
+}
+
+async function secureStoreFiles(storePath: string): Promise<void> {
+	await securePath(dirname(storePath), 0o700);
+	await securePath(storePath, 0o600);
+	await securePath(`${storePath}-wal`, 0o600);
+	await securePath(`${storePath}-shm`, 0o600);
+}
+
 async function openStore(storePath: string): Promise<HashStore> {
 	// Multi-store: never close another workspace's store when opening this one.
 
 	await initHasher();
-	await mkdir(dirname(storePath), { recursive: true });
+	await mkdir(dirname(storePath), { recursive: true, mode: 0o700 });
+	await securePath(dirname(storePath), 0o700);
 
 	let existed = existsSync(storePath);
 	let opened: { db: DatabaseSync; stmts: Prepared };
@@ -633,6 +679,12 @@ async function openStore(storePath: string): Promise<HashStore> {
 		opened = openDbWithBusyRetry(storePath);
 	}
 	const { db, stmts } = opened;
+	try {
+		await secureStoreFiles(storePath);
+	} catch (error) {
+		shutdownDb(db);
+		throw error;
+	}
 
 	if (!existed) {
 		await migrateLegacy(db, storePath);
@@ -659,7 +711,8 @@ async function openStore(storePath: string): Promise<HashStore> {
 
 /** Resolve the store path for this call: explicit cwd, the active workspace, or the shared-home fallback. */
 function storePathFor(cwd?: string): string {
-	return hashStorePath(cwd ?? workspaceCwd());
+	const activeCwd = cwd ?? workspaceCwd();
+	return hashStorePath(activeCwd, cwd === undefined ? workspaceSessionKey() : undefined);
 }
 
 /**

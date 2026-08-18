@@ -1,8 +1,8 @@
 /**
- * Regression tests for the per-workspace store: every tool call resolves the
- * store at `<workspace>/.dsh_better_edit/` (the workspace being the session
- * cwd carried by `withWorkspace`), and parallel workspaces keep separate
- * stores — snapshots, served rows, and undo history never leak between them.
+ * Regression tests for the workspace-keyed store: every tool call resolves a
+ * private DSH-home database from the session cwd carried by `withWorkspace`,
+ * and parallel workspaces keep separate stores — snapshots, served rows, and
+ * undo history never leak between them.
  * @module dsh-better-edit/workspace-store.test
  */
 
@@ -37,18 +37,16 @@ describe("workspace context", () => {
 		}
 	});
 
-	it("resolves the store file under <workspace>/.dsh_better_edit", async () => {
+	it("resolves a private DSH-home store keyed by the workspace", async () => {
 		const cwd = tempWorkspace("dsh-ws-path-");
 		try {
-			expect(hashStorePath(cwd)).toBe(
-				join(cwd, ".dsh_better_edit", "hash-store.sqlite"),
-			);
+			const storePath = hashStorePath(cwd);
+			expect(storePath).not.toContain(cwd);
+			expect(storePath).toContain("workspaces");
 			await withWorkspace(cwd, async () => {
 				await loadHashStore();
 			});
-			expect(
-				existsSync(join(cwd, ".dsh_better_edit", "hash-store.sqlite")),
-			).toBe(true);
+			expect(existsSync(storePath)).toBe(true);
 		} finally {
 			shutdownHashStore();
 			rmSync(cwd, { recursive: true, force: true });

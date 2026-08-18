@@ -70,7 +70,7 @@ export function buildReadTool(io: FileIO) {
 			await io.emitObserved(absolutePath, exec, signal);
 
 			return text;
-			})
+			}, execSessionKey(exec))
 		},
 	});
 }

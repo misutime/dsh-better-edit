@@ -69,6 +69,7 @@ const BATCH_ITEM_KS = new Set([
 ]);
 
 const READ_KS = new Set(["path", "offset", "limit"]);
+const UNDO_KS = new Set(["path", "sandbox_permissions", "justification"]);
 
 // ---- assertions ---------------------------------------------------------------
 
@@ -164,6 +165,7 @@ export function assertUndoRequest(
 	if (!isRec(request)) {
 		throw new Error("[E_BAD_SHAPE] undo_last_edit request must be an object.");
 	}
+	rejectUnknownFields(request, UNDO_KS, "undo_last_edit request");
 	normalizeFilePath(request);
 	if (typeof request.path !== "string" || request.path.length === 0) {
 		throw new Error(

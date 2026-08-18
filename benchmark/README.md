@@ -70,29 +70,29 @@ fixed 4-hex placeholder (`a1b2`), because any 4-hex value tokenizes identically.
 
 | scenario | lines | hashline | str_replace | oh-my-pi seq | oh-my-pi batch |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| single · constant | 1 | 37 | 37 | 27 | — |
-| single · comment | 1 | 39 | 39 | 29 | — |
-| single · assignment | 1 | 36 | 38 | 28 | — |
-| single · signature | 1 | 40 | 43 | 32 | — |
-| single · guard | 1 | 43 | 46 | 35 | — |
-| single · expression | 1 | 40 | 45 | 32 | — |
-| single · getter | 1 | 33 | 32 | 25 | — |
-| single · export fn | 1 | 41 | 44 | 33 | — |
-| multi · 3-line if-block | 3 | 60 | 84 | 50 | — |
-| multi · 6-line helper body | 6 | 73 | 128 | 63 | — |
-| multi · 10-line loop block | 10 | 79 | 149 | 70 | — |
-| multi · 15-line method body | 15 | 181 | 330 | 166 | — |
-| **single-line ×8** | | **309** | **324** | **241** | — |
-| **multi-line ×4** | | **393** | **691** | **349** | — |
-| **TOTAL ×12** | | **702** | **1015** | **590** | **480** |
+| single · constant | 1 | 35 | 38 | 27 | — |
+| single · comment | 1 | 37 | 41 | 29 | — |
+| single · assignment | 1 | 38 | 40 | 28 | — |
+| single · signature | 1 | 40 | 44 | 32 | — |
+| single · guard | 1 | 41 | 47 | 35 | — |
+| single · expression | 1 | 40 | 46 | 32 | — |
+| single · getter | 1 | 33 | 33 | 25 | — |
+| single · export fn | 1 | 41 | 45 | 33 | — |
+| multi · 3-line if-block | 3 | 60 | 87 | 50 | — |
+| multi · 6-line helper body | 6 | 73 | 135 | 63 | — |
+| multi · 10-line loop block | 10 | 79 | 158 | 70 | — |
+| multi · 15-line method body | 15 | 182 | 345 | 166 | — |
+| **single-line ×8** | | **305** | **334** | **241** | — |
+| **multi-line ×4** | | **394** | **725** | **349** | — |
+| **TOTAL ×12** | | **699** | **1059** | **590** | **480** |
 
-Saved vs `str_replace`: hashline **313 (31%)** · oh-my-pi per-edit **425 (42%)** · oh-my-pi batch
-**535 (53%)**.
+Saved vs `str_replace`: hashline **360 (34%)** · oh-my-pi per-edit **469 (44%)** · oh-my-pi batch
+**579 (55%)**.
 
 - **hashline vs str_replace** — 5% on single lines (the two 3-char anchors plus key-name overhead
-  roughly cancel a one-line `old_string`), 29–47% on multi-line ranges. Savings scale with the size
+  roughly cancel a one-line `old_string`), 31–50% on multi-line ranges. Savings scale with the size
   of the replaced text.
-- **oh-my-pi vs str_replace** — 26% on single lines (no JSON envelope), 40–53% on multi-line
+- **oh-my-pi vs str_replace** — 26% on single lines (no JSON envelope), 40–52% on multi-line
   ranges. The payload is *lighter* than this plugin's tool call: a patch language skips JSON keys,
   braces, and escaping. That is a real property of the format, and this README does not hide it.
 - **oh-my-pi batch vs per-edit** — 590 → 480 tokens: 12 headers collapse into 1. The format's

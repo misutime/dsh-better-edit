@@ -164,6 +164,7 @@ export function buildEditTool(io: FileIO, sandbox: FsSandboxController) {
 				abortIf(signal);
 				await persistUndoAndWrite({
 					io,
+					sessionKey,
 					files: [
 						{
 							absolutePath,
@@ -219,7 +220,7 @@ export function buildEditTool(io: FileIO, sandbox: FsSandboxController) {
 					);
 				}
 				return changed.content[0]!.text;
-			});
+			}, execSessionKey(exec));
 		},
 	});
 }

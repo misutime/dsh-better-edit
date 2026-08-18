@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import {
 	isAbsolute,
@@ -12,31 +13,45 @@ import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
 import { errCode } from "./utils.js";
 
 /**
- * On-disk home for dsh-better-edit state. Inside a tool call the store lives
- * co-located with the files being edited: `<workspace>/.dsh_better_edit/` (the
- * workspace is the session cwd, carried through the execution by
- * `withWorkspace`). Outside a tool call — tests, previews, startup — the store
- * falls back to the shared DeepSeek Harness home
- * (`$DSH_HOME/plugins/dsh-better-edit`, default `~/.dsh/plugins/dsh-better-edit`),
- * so a caller without a workspace never writes into an arbitrary cwd.
+ * Return the private state directory for one workspace.
+ *
+ * Workspace state is kept below the DSH home rather than inside the project,
+ * so SQLite files containing source snapshots cannot be committed accidentally
+ * and remote workspace paths are never interpreted as host filesystem paths.
+ * The SHA-256 directory key keeps separate workspaces isolated without exposing
+ * their absolute paths in the state layout. A session key is included when
+ * supplied so remote sandboxes that reuse a POSIX cwd cannot share state.
  * @param cwd - the workspace root, or undefined for the shared-home fallback.
+ * @param sessionKey - optional opaque session identity for tool-call stores.
  */
-export function configDir(cwd?: string): string {
-	return cwd !== undefined
-		? join(resolvePath(cwd), ".dsh_better_edit")
-		: join(resolveDshHome(), "plugins", "dsh-better-edit");
+function workspaceKeyInput(cwd: string): string {
+	const normalized = cwd.replaceAll("\\", "/");
+	// A POSIX absolute cwd can identify a remote filesystem even when the host
+	// process is Windows; do not reinterpret it as a drive-rooted host path.
+	if (process.platform === "win32" && normalized.startsWith("/") && !normalized.startsWith("//")) {
+		return normalized;
+	}
+	const resolved = resolvePath(cwd).replaceAll("\\", "/");
+	return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-export function hashStorePath(cwd?: string): string {
-	return join(configDir(cwd), "hash-store.sqlite");
+export function configDir(cwd?: string, sessionKey?: string): string {
+	if (cwd === undefined) return join(resolveDshHome(), "plugins", "dsh-better-edit");
+	const identity = JSON.stringify([workspaceKeyInput(cwd), sessionKey ?? null]);
+	const key = createHash("sha256").update(identity).digest("hex");
+	return join(resolveDshHome(), "plugins", "dsh-better-edit", "workspaces", key);
 }
 
-export function legacyHashStorePath(cwd?: string): string {
-	return join(configDir(cwd), "hash-store.json");
+export function hashStorePath(cwd?: string, sessionKey?: string): string {
+	return join(configDir(cwd, sessionKey), "hash-store.sqlite");
 }
 
-export function hashStoreDir(cwd?: string): string {
-	return dirname(hashStorePath(cwd));
+export function legacyHashStorePath(cwd?: string, sessionKey?: string): string {
+	return join(configDir(cwd, sessionKey), "hash-store.json");
+}
+
+export function hashStoreDir(cwd?: string, sessionKey?: string): string {
+	return dirname(hashStorePath(cwd, sessionKey));
 }
 
 function homeBase(): string {

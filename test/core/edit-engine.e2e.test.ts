@@ -64,7 +64,7 @@ describe("edit-sequence engine — end-to-end through the tool builders", () => 
 		});
 	});
 
-	it("batch_edit with a failing edit aborts atomically — nothing written, earlier items unapplied", async () => {
+	it("batch_edit with a failing validation aborts before any file write", async () => {
 		await withTempFile("t.txt", CONTENT, async ({ cwd, path }) => {
 			const harness = setupIntegrationTest(cwd);
 			const served = await servedRows(harness, "t.txt");
